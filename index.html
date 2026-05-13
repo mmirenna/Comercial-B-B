@@ -997,6 +997,10 @@ function renderMensual(){
     if(col==='ots')     return row.ots;
     return row.m;
   };
+  // Build mesMap here so it's available in the template
+  const mesMap={};
+  labels.forEach((m,i)=>mesMap[m]=i);
+
   const mesRows=labels.map((m,i)=>({m,fact:facts[i],marg:margens[i],rent:rents[i],ots:otsCnt[i],moReal:moReals[i],mat:meses[m]?.mat||0,i}));
   const sortedMes=sortRows(mesRows,stM.col,stM.dir,getMVal);
 
