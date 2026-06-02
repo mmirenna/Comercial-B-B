@@ -180,6 +180,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
   <button class="tab-btn active" onclick="switchTab('resumen')">Resumen</button>
   <button class="tab-btn" onclick="switchTab('rentabilidad')">Rentabilidad</button>
   <button class="tab-btn" onclick="switchTab('mensual')">Comparación mensual</button>
+  <button class="tab-btn" onclick="switchTab('diseno')">Diseño</button>
   <button class="tab-btn" onclick="switchTab('historial')">Historial</button>
 </div>
 
@@ -397,6 +398,64 @@ tr:hover td{background:rgba(255,255,255,.03)}
 </div>
 
 <!-- ══════════════════════════════════════
+     TAB: DISEÑO
+══════════════════════════════════════ -->
+<div class="tab-panel" id="tab-diseno">
+<div class="shell">
+
+  <div class="sec-title">Horas diseño — resumen</div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">Hs. diseño presupuestadas</div><div class="kpi-value blue" id="d-pres">—</div><div class="kpi-sub">Según OTs filtradas</div></div>
+    <div class="kpi"><div class="kpi-label">Hs. diseño reales</div><div class="kpi-value green" id="d-real">—</div><div class="kpi-sub" id="d-real-sub">—</div></div>
+    <div class="kpi"><div class="kpi-label">Costo diseño pres.</div><div class="kpi-value" id="d-costo-pres">—</div><div class="kpi-sub">Hs pres. × Costo Hr Sr</div></div>
+    <div class="kpi"><div class="kpi-label">Costo diseño real</div><div class="kpi-value amber" id="d-costo-real">—</div><div class="kpi-sub">Hs reales × Costo Hr Sr</div></div>
+    <div class="kpi"><div class="kpi-label">Desvío diseño</div><div class="kpi-value" id="d-desvio">—</div><div class="kpi-sub" id="d-desvio-sub">—</div></div>
+  </div>
+
+  <div class="grid2" style="margin-top:12px">
+    <div class="box">
+      <div class="box-header">
+        <div><div class="box-title">Horas por OT — presupuestado vs real</div></div>
+      </div>
+      <div class="legend">
+        <div class="leg-item"><div class="leg-dot" style="background:#4f7cff"></div>Presupuestadas</div>
+        <div class="leg-item"><div class="leg-dot" style="background:#34c98a"></div>Reales</div>
+      </div>
+      <div class="chart-wrap h260"><canvas id="ch-d-comp"></canvas></div>
+    </div>
+    <div class="box">
+      <div class="box-header">
+        <div><div class="box-title">Horas reales por diseñador</div></div>
+        <div class="box-total" id="tot-d-op">—</div>
+      </div>
+      <div class="chart-wrap h260"><canvas id="ch-d-op"></canvas></div>
+    </div>
+  </div>
+
+  <div class="sec-title">Detalle por proyecto</div>
+  <div class="box full">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Proyecto</th>
+          <th class="td-c">Período</th>
+          <th class="td-r">Hs pres.</th>
+          <th class="td-r">Hs reales</th>
+          <th class="td-r">Avance %</th>
+          <th class="td-r">Costo pres. $</th>
+          <th class="td-r">Costo real $</th>
+          <th class="td-r">Desvío $</th>
+          <th class="td-c">Alerta</th>
+        </tr></thead>
+        <tbody id="tbl-diseno"></tbody>
+      </table>
+    </div>
+    <p class="note">* Costo = Horas × Costo Hora Senior de la OT. Desvío positivo = excedencia.</p>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════
      TAB: HISTORIAL
 ══════════════════════════════════════ -->
 <div class="tab-panel" id="tab-historial">
@@ -530,7 +589,7 @@ function updateMsTriggerLabel(key, sel, label) {
 function switchTab(id) {
   activeTab = id;
   document.querySelectorAll('.tab-btn').forEach((b,i)=>{
-    const ids=['resumen','rentabilidad','mensual','historial'];
+    const ids=['resumen','rentabilidad','mensual','diseno','historial'];
     b.classList.toggle('active', ids[i]===id);
   });
   document.querySelectorAll('.tab-panel').forEach(p=>{
@@ -620,8 +679,10 @@ function aplicarFiltros(){
   let hist=(RAW.historico||[]).filter(h=>nombresOTs.has(String(h['Orden de trabajo']||'').trim()));
   if(selectedPeriodos.size>0) hist=hist.filter(h=>selectedPeriodos.has(String(h['Año Mes']||'').trim()));
 
-  // Planificación no se usa en comercial pero la dejamos por consistencia
-  renderTodos(ots, hist);
+  let histDiseno=(RAW.historicoDiseno||[]).filter(h=>nombresOTs.has(String(h['Orden de trabajo']||'').trim()));
+  if(selectedPeriodos.size>0) histDiseno=histDiseno.filter(h=>selectedPeriodos.has(String(h['Año Mes']||'').trim()));
+
+  renderTodos(ots, hist, histDiseno);
   document.getElementById('loading').classList.add('hidden');
 }
 
@@ -646,26 +707,28 @@ function calcMOPresupuestado(o) {
   return hsJr*cjr + hsSr*csr + hsMon*cjr;
 }
 
-function calcMOReal(o, histOT) {
+function calcMOReal(o, histOT, histDisenoOT) {
   const cjr = +o['Costo Hora Junior']||0;
   const csr = +o['Costo Hora Senior']||0;
-  const nom  = String(o['Nombre proyecto']||'').trim();
-  // Jr real: horas históricas en áreas jr
+  // Jr real: horas históricas en áreas jr (planta)
   const hsJrReal = AREAS_JR.reduce((a,ar)=>
-    a+histOT.filter(h=>h['Tarea OK']===ar).reduce((b,h)=>b+(+h['Tiempo (hs)']||0),0),0);
-  // Sr: directo de la OT (no hay histórico por área sr)
-  const hsSr = (+o['Horas de Diseño']||0)+(+o['Horas de Comercial']||0)+(+o['Horas de Planta (Senior)']||0);
-  // Montaje: de la OT
-  const hsMon= +o['Horas de Montaje']||0;
-  return hsJrReal*cjr + hsSr*csr + hsMon*cjr;
+    a+(histOT||[]).filter(h=>h['Tarea OK']===ar).reduce((b,h)=>b+(+h['Tiempo (hs)']||0),0),0);
+  // Diseño real: horas históricas de diseño × Costo Hora Senior
+  const hsDisenoReal = (histDisenoOT||[]).reduce((a,h)=>a+(+h['Tiempo (hs)']||0),0);
+  // Comercial y Planta Senior: directo de la OT
+  const hsSrOT = (+o['Horas de Comercial']||0)+(+o['Horas de Planta (Senior)']||0);
+  // Montaje: de la OT × jr
+  const hsMon = +o['Horas de Montaje']||0;
+  return hsJrReal*cjr + hsDisenoReal*csr + hsSrOT*csr + hsMon*cjr;
 }
 
 /* ══════════════════════════════════════
    RENDER TODOS
 ══════════════════════════════════════ */
-function renderTodos(ots, hist){
+function renderTodos(ots, hist, histDiseno){
   renderResumen(ots, hist);
-  renderRentabilidad(ots, hist);
+  renderDiseno(ots, histDiseno||[]);
+  renderRentabilidad(ots, hist, histDiseno||[]);
   renderMensual();   // usa RAW completo para serie temporal
   renderHistorial(ots, hist);
 }
@@ -764,16 +827,17 @@ function renderResumen(ots, hist){
 }
 
 /* ─────────────── RENTABILIDAD ─────────────── */
-function renderRentabilidad(ots, hist){
+function renderRentabilidad(ots, hist, histDiseno){
   let totMOPres=0,totMOReal=0,totFact=0,totMat=0;
 
   const rows=ots.map(o=>{
     const nom=String(o['Nombre proyecto']||'').trim();
     const histOT=hist.filter(h=>String(h['Orden de trabajo']||'').trim()===nom);
+    const histDisenoOT=(histDiseno||[]).filter(h=>String(h['Orden de trabajo']||'').trim()===nom);
     const precio=+o['Precio (Sin IVA)']||0;
     const mat   =+o['Costo Total Materiales (Sin IVA)']||0;
     const moPres=calcMOPresupuestado(o);
-    const moReal=calcMOReal(o,histOT);
+    const moReal=calcMOReal(o,histOT,histDisenoOT);
     const costPres=moPres+mat;
     const costReal=moReal+mat;
     const rentPres=precio>0?(precio-costPres)/precio*100:null;
@@ -1097,6 +1161,91 @@ function renderHistorial(ots, hist){
   }).join('');
 }
 
+
+function renderDiseno(ots, histDiseno){
+  const disenoRows = ots.map(o=>{
+    const nom = String(o['Nombre proyecto']||'').trim();
+    const csr = +o['Costo Hora Senior']||0;
+    const pres = +o['Horas de Diseño']||0;
+    const real = (histDiseno||[])
+      .filter(h=>String(h['Orden de trabajo']||'').trim()===nom)
+      .reduce((a,h)=>a+(+h['Tiempo (hs)']||0),0);
+    const costPres = pres*csr;
+    const costReal = real*csr;
+    const desvio   = costReal - costPres;
+    const avance   = pres>0 ? real/pres*100 : null;
+    return {o, nom, pres, real, csr, costPres, costReal, desvio, avance};
+  });
+
+  const totPres     = disenoRows.reduce((a,r)=>a+r.pres,0);
+  const totReal     = disenoRows.reduce((a,r)=>a+r.real,0);
+  const totCostPres = disenoRows.reduce((a,r)=>a+r.costPres,0);
+  const totCostReal = disenoRows.reduce((a,r)=>a+r.costReal,0);
+  const totDesvio   = totCostReal - totCostPres;
+
+  document.getElementById('d-pres').textContent      = totPres.toFixed(1)+' hs';
+  document.getElementById('d-real').textContent      = totReal.toFixed(1)+' hs';
+  document.getElementById('d-real-sub').textContent  = totPres>0?fmtPct(totReal/totPres*100)+' ejecutado':'—';
+  document.getElementById('d-costo-pres').textContent= fmtM(totCostPres);
+  document.getElementById('d-costo-real').textContent= fmtM(totCostReal);
+  document.getElementById('d-desvio').textContent    = fmtM(Math.abs(totDesvio));
+  document.getElementById('d-desvio').className      = 'kpi-value '+(totDesvio>0?'red':'green');
+  document.getElementById('d-desvio-sub').textContent= totDesvio>0?'Por encima del presupuesto':'Por debajo del presupuesto';
+
+  // Chart por OT — top 10 por horas presupuestadas, mayor a menor
+  const sorted=[...disenoRows].filter(r=>r.pres>0||r.real>0)
+                               .sort((a,b)=>b.pres-a.pres).slice(0,10);
+  newChart('ch-d-comp',{type:'bar',
+    data:{labels:sorted.map(r=>shortOT(r.nom)),
+      datasets:[
+        {label:'Presupuestadas',data:sorted.map(r=>+r.pres.toFixed(1)),backgroundColor:'#4f7cff',borderRadius:3},
+        {label:'Reales',        data:sorted.map(r=>+r.real.toFixed(1)),backgroundColor:'#34c98a',borderRadius:3}
+      ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' '+ctx.raw.toFixed(1)+' hs'}}},
+      scales:{x:{grid:{display:false},ticks:{font:{size:10},color:'#4a4f60',maxRotation:35,autoSkip:false}},
+              y:{grid:{color:'rgba(255,255,255,.05)'},ticks:{font:{size:11},color:'#7c8192',callback:v=>v+'h'}}}}
+  });
+
+  // Chart por diseñador
+  const porOp={};
+  (histDiseno||[]).forEach(h=>{
+    const op=String(h['Operario']||'').trim();
+    if(op) porOp[op]=(porOp[op]||0)+(+h['Tiempo (hs)']||0);
+  });
+  const opEntries=Object.entries(porOp).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('tot-d-op').textContent=(opEntries.reduce((a,[,v])=>a+v,0)).toFixed(1)+' hs';
+  newChart('ch-d-op',{type:'bar',
+    data:{labels:opEntries.map(([k])=>k),
+      datasets:[{data:opEntries.map(([,v])=>+v.toFixed(1)),backgroundColor:'#a78bfa',borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>' '+ctx.raw.toFixed(1)+' hs'}}},
+      scales:{x:{grid:{color:'rgba(255,255,255,.05)'},ticks:{font:{size:11},color:'#7c8192',callback:v=>v+'h'}},
+              y:{grid:{display:false},ticks:{font:{size:11},color:'#7c8192'}}}}
+  });
+
+  // Tabla detalle
+  const tb=document.getElementById('tbl-diseno');
+  tb.innerHTML=sorted.map(r=>{
+    const av=r.avance;
+    let alerta;
+    if(av===null) alerta='<span class="badge badge-gray">Sin datos</span>';
+    else if(av>110) alerta='<span class="badge badge-red">▲ Excedida</span>';
+    else if(av>=90) alerta='<span class="badge badge-amber">≈ Ok</span>';
+    else alerta='<span class="badge badge-green">✓ Ok</span>';
+    return `<tr>
+      <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.nom)}">${esc(shortOT(r.nom))}</td>
+      <td class="td-c" style="font-family:var(--mono);font-size:11px">${esc(String(r.o['Año Mes']||''))}</td>
+      <td class="td-r">${r.pres.toFixed(1)}</td>
+      <td class="td-r">${r.real.toFixed(1)}</td>
+      <td class="td-r" style="color:${av!==null&&av>110?'var(--red)':av>=90?'var(--amber)':'var(--green)'}">${av!==null?fmtPct(av):'—'}</td>
+      <td class="td-r">${fmtM(r.costPres)}</td>
+      <td class="td-r" style="color:${r.desvio>0?'var(--red)':'var(--green)'}">${fmtM(r.costReal)}</td>
+      <td class="td-r" style="color:${r.desvio>0?'var(--red)':'var(--green)'}">${r.desvio>0?'+':''}${fmtM(r.desvio)}</td>
+      <td class="td-c">${alerta}</td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="9" style="color:var(--text3);text-align:center;padding:20px">Sin datos de horas diseño</td></tr>';
+}
 
 function mostrarError(msg){
   const b=document.getElementById('error-bar');
